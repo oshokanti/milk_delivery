@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:milk_delivery/screens/shopkeeper_signup_screen.dart';
-import 'package:milk_delivery/screens/shopkeeper_dashboard.dart';
+import 'package:milk_delivery/screens/admin_dashboard.dart';
 import 'package:milk_delivery/screens/loading_screen.dart';
+import 'package:milk_delivery/screens/shopkeeper_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -29,12 +30,12 @@ class _LoginScreenState extends State<LoginScreen> {
               Icon(Icons.local_shipping, size: 80, color: Colors.blue.shade700),
               const SizedBox(height: 16),
               const Text(
-                'Milk Delivery',
+                'Medhya Farm',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.blue),
               ),
               const SizedBox(height: 8),
               const Text(
-                'Driver App',
+                'Distribution System',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
               const SizedBox(height: 48),
@@ -128,27 +129,29 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (response.user != null) {
-        // Check if user is a shopkeeper
-        final shopkeeperData = await Supabase.instance.client
-            .from('shopkeepers')
-            .select()
-            .eq('user_id', response.user!.id)
+        // Check user profile role
+        final profile = await Supabase.instance.client
+            .from('profiles')
+            .select('role')
+            .eq('id', response.user!.id)
             .maybeSingle();
 
-        if (shopkeeperData != null) {
-          // Shopkeeper → go to shopkeeper dashboard
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const ShopkeeperDashboard()),
-          );
-          return;
+        if (profile != null) {
+          final role = profile['role'] as String? ?? 'driver';
+          if (role == 'admin') {
+            Navigator.pushReplacementNamed(context, '/admin');
+          } else if (role == 'driver') {
+            Navigator.pushReplacementNamed(context, '/driver');
+          } else if (role == 'shopkeeper') {
+            Navigator.pushReplacementNamed(context, '/shopkeeper');
+          } else {
+            // fallback to driver
+            Navigator.pushReplacementNamed(context, '/driver');
+          }
+        } else {
+          // No profile – default to driver (or show error)
+          Navigator.pushReplacementNamed(context, '/driver');
         }
-
-        // If not shopkeeper, go to driver loading screen
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const LoadingScreen()),
-        );
       }
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
-import 'screens/shopkeeper_signup_screen.dart';
+import 'screens/admin_dashboard.dart';
+import 'screens/loading_screen.dart';
+import 'screens/shopkeeper_dashboard.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,7 +22,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Milk Delivery',
+      title: 'Medhya Farm',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
@@ -28,7 +30,9 @@ class MyApp extends StatelessWidget {
       home: const LoginScreen(),
       debugShowCheckedModeBanner: false,
       routes: {
-        '/signup': (context) => const ShopkeeperSignupScreen(),
+        '/admin': (context) => const AdminDashboard(),
+        '/driver': (context) => const LoadingScreen(),
+        '/shopkeeper': (context) => const ShopkeeperDashboard(),
       },
     );
   }
