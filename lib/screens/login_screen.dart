@@ -1,3 +1,4 @@
+import 'package:milk_delivery/screens/driver_login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:milk_delivery/screens/shopkeeper_signup_screen.dart';
@@ -103,9 +104,30 @@ class _LoginScreenState extends State<LoginScreen> {
                       );
                     },
                     child: const Text('Register as Shopkeeper'),
+
+                    
                   ),
                 ],
               ),
+
+
+const SizedBox(height: 8),
+ElevatedButton.icon(
+  onPressed: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const DriverLoginScreen()),
+    );
+  },
+  icon: const Icon(Icons.qr_code_scanner),
+  label: const Text('Driver Login via Barcode'),
+  style: ElevatedButton.styleFrom(
+    backgroundColor: Colors.green,
+    foregroundColor: Colors.white,
+    minimumSize: const Size(double.infinity, 50),
+  ),
+),
+
               TextButton(
                 onPressed: () {},
                 child: const Text('Forgot Password?'),

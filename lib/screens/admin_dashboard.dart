@@ -1,7 +1,9 @@
+import 'package:milk_delivery/screens/driver_management_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:milk_delivery/screens/product_list_screen.dart';
 import 'package:milk_delivery/screens/daily_stock_entry_screen.dart';
+import 'package:milk_delivery/screens/vehicle_management_screen.dart';
 
 class AdminDashboard extends StatelessWidget {
   const AdminDashboard({super.key});
@@ -53,16 +55,24 @@ class AdminDashboard extends StatelessWidget {
             ),
             _buildCard(
               context,
-              icon: Icons.person,
-              label: 'Drivers',
-              color: Colors.green,
-              onTap: () {
-                // TODO: Driver management
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Driver management coming soon')),
-                );
-              },
+              icon: Icons.directions_car,
+              label: 'Vehicles',
+              color: Colors.teal,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const VehicleManagementScreen()),
+              ),
             ),
+          _buildCard(
+  context,
+  icon: Icons.person,
+  label: 'Drivers',
+  color: Colors.green,
+  onTap: () => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (context) => const DriverManagementScreen()),
+  ),
+),
             _buildCard(
               context,
               icon: Icons.store,
@@ -84,18 +94,6 @@ class AdminDashboard extends StatelessWidget {
                 // TODO: Reports
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Reports coming soon')),
-                );
-              },
-            ),
-            _buildCard(
-              context,
-              icon: Icons.settings,
-              label: 'Settings',
-              color: Colors.grey,
-              onTap: () {
-                // TODO: Settings
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Settings coming soon')),
                 );
               },
             ),
