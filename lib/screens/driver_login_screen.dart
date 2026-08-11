@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:milk_delivery/screens/driver_dashboard.dart'; // <-- added import
 
 class DriverLoginScreen extends StatefulWidget {
   const DriverLoginScreen({super.key});
@@ -21,10 +22,6 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   final TextEditingController _pinController = TextEditingController();
   final TextEditingController _barcodeController = TextEditingController();
   bool _obscurePin = true;
-
-  // For now, we'll use a hardcoded driver UUID to test the PIN flow
-  // Replace this with your actual driver UUID from the database.
-  final String _hardcodedDriverId = 'c4a8f585-57cf-46b4-b107-7980c8f0e90b'; // Amit's ID
 
   bool get _isMobile => defaultTargetPlatform == TargetPlatform.android ||
       defaultTargetPlatform == TargetPlatform.iOS;
@@ -60,20 +57,18 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   }
 
   Future<void> _lookupDriver(String barcodeId) async {
-    // For testing purposes, we ignore the barcode and use the hardcoded driver UUID.
-    // After successful testing, remove this bypass and use the barcode lookup.
+    // For now, we'll use a hardcoded driver UUID to bypass barcode lookup.
+    // Replace this with the actual barcode lookup later.
     setState(() => _isLoading = true);
-
     try {
-      // 🔹 HARDCODED BYPASS – always fetch the same driver
       final response = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', _hardcodedDriverId)
+          .eq('id', 'c4a8f585-57cf-46b4-b107-7980c8f0e90b') // your driver ID
           .maybeSingle();
 
       if (response == null) {
-        _showError('Driver not found. Please check the hardcoded ID.');
+        _showError('Driver not found. Please contact admin.');
         setState(() {
           _isLoading = false;
           _isScanning = false;
@@ -99,7 +94,6 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         _isLoading = false;
       });
 
-      // Now show PIN creation or entry
       if (_driverProfile!['pin_hash'] != null) {
         _showPinEntry();
       } else {
@@ -152,14 +146,13 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                 _showError('PIN must be 4-6 digits');
                 return;
               }
-              // Store plain text for demo (hash in production)
               await supabase
                   .from('profiles')
                   .update({'pin_hash': pin})
                   .eq('id', _driverProfile!['id']);
               _showSuccess('PIN created successfully!');
               Navigator.pop(context);
-              _navigateToDriverDashboard();
+              _navigateToDriverDashboard(); // <-- calls helper
             },
             child: const Text('Set PIN'),
           ),
@@ -203,7 +196,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
               if (enteredPin == storedPin) {
                 _showSuccess('Login successful!');
                 Navigator.pop(context);
-                _navigateToDriverDashboard();
+                _navigateToDriverDashboard(); // <-- calls helper
               } else {
                 _showError('Incorrect PIN');
               }
@@ -230,7 +223,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       if (authenticated) {
         _showSuccess('Fingerprint verified!');
         Navigator.pop(context);
-        _navigateToDriverDashboard();
+        _navigateToDriverDashboard(); // <-- calls helper
       } else {
         _showError('Fingerprint not recognized');
       }
@@ -239,10 +232,15 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     }
   }
 
+  // Helper to navigate with driver ID
   void _navigateToDriverDashboard() {
-    // TODO: Replace with actual Driver Dashboard screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Navigating to driver dashboard... (coming soon)')),
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DriverDashboard(
+          driverId: _driverProfile!['id'], // <-- pass the ID
+        ),
+      ),
     );
   }
 
@@ -271,7 +269,6 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
           : _scannedBarcode == null
               ? Column(
                   children: [
-                    // Camera section (mobile only)
                     if (_isMobile)
                       Expanded(
                         flex: 2,
@@ -336,14 +333,6 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                             child: const Text('Submit'),
                           ),
                         ],
-                      ),
-                    ),
-                    // Temporary note about hardcoded bypass
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 16),
-                      child: Text(
-                        'Note: Currently using a hardcoded driver UUID for testing.',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
                       ),
                     ),
                   ],

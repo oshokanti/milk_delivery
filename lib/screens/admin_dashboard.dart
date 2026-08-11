@@ -1,3 +1,4 @@
+import 'package:milk_delivery/screens/admin_delivery_tracking_screen.dart';
 import 'package:milk_delivery/screens/driver_management_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -73,6 +74,19 @@ class AdminDashboard extends StatelessWidget {
     MaterialPageRoute(builder: (context) => const DriverManagementScreen()),
   ),
 ),
+_buildCard(
+  context,
+  icon: Icons.delivery_dining,
+  label: 'Deliveries',
+  color: Colors.indigo,
+  onTap: () => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) => const AdminDeliveryTrackingScreen(),
+    ),
+  ),
+),
+
             _buildCard(
               context,
               icon: Icons.store,
