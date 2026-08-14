@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -15,37 +16,44 @@ class _DailyStockEntryScreenState extends State<DailyStockEntryScreen> {
   bool isLoading = true;
   bool isSaving = false;
   String? today;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
     today = DateTime.now().toIso8601String().split('T')[0];
     fetchData();
+    // Auto-refresh every 30 seconds (low compute)
+    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (mounted) fetchData();
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    for (var controller in stockControllers.values) controller.dispose();
+    super.dispose();
   }
 
   Future<void> fetchData() async {
     setState(() => isLoading = true);
     try {
-      // Fetch all active products
       final productData = await supabase.from('products').select('*').order('name');
-
-      // Fetch today's stock entries
       final stockData = await supabase
           .from('master_stock')
-          .select('*')
+          .select('product_id, remaining_quantity')
           .eq('date', today!);
-
-      // Map product_id -> stock entry
-      final stockMap = {for (var s in stockData) s['product_id']: s};
+      final stockMap = {for (var s in stockData) s['product_id']: s['remaining_quantity']};
 
       setState(() {
         products = List<Map<String, dynamic>>.from(productData);
-        stockControllers = {};
+        stockControllers.clear();
         for (var product in products) {
           final id = product['id'];
-          final existing = stockMap[id];
-          final initial = existing != null ? existing['initial_quantity'].toString() : '';
-          stockControllers[id] = TextEditingController(text: initial);
+          stockControllers[id] = TextEditingController(
+            text: (stockMap[id] ?? 0).toString(),
+          );
         }
         isLoading = false;
       });
@@ -60,137 +68,85 @@ class _DailyStockEntryScreenState extends State<DailyStockEntryScreen> {
     try {
       for (var product in products) {
         final id = product['id'];
-        final value = stockControllers[id]?.text.trim() ?? '';
-        if (value.isEmpty) continue;
-        final quantity = int.tryParse(value);
-        if (quantity == null || quantity < 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Invalid quantity for ${product['name']}'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-          setState(() => isSaving = false);
-          return;
-        }
+        final controller = stockControllers[id];
+        if (controller == null) continue;
+        final qty = int.tryParse(controller.text.trim());
+        if (qty == null || qty < 0) continue;
 
-        // Check if stock entry exists for today
         final existing = await supabase
             .from('master_stock')
-            .select()
+            .select('id')
             .eq('product_id', id)
             .eq('date', today!)
             .maybeSingle();
 
         if (existing != null) {
-          // Update
           await supabase
               .from('master_stock')
-              .update({
-                'initial_quantity': quantity,
-                'remaining_quantity': quantity, // reset remaining to initial
-              })
+              .update({'remaining_quantity': qty})
               .eq('id', existing['id']);
         } else {
-          // Insert
           await supabase.from('master_stock').insert({
             'product_id': id,
             'date': today!,
-            'initial_quantity': quantity,
-            'remaining_quantity': quantity,
+            'initial_quantity': qty,
+            'remaining_quantity': qty,
           });
         }
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stock saved successfully'), backgroundColor: Colors.green),
+        const SnackBar(content: Text('Stock saved!'), backgroundColor: Colors.green),
       );
-      await fetchData(); // Refresh
+      await fetchData();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}'), backgroundColor: Colors.red),
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
+    } finally {
+      setState(() => isSaving = false);
     }
-    setState(() => isSaving = false);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Daily Stock Entry - $today'),
+        title: Text('Daily Stock - $today'),
         backgroundColor: Colors.orange,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: isSaving ? null : saveStock,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: fetchData),
+          IconButton(icon: const Icon(Icons.save), onPressed: isSaving ? null : saveStock),
         ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: Text(
-                    'Enter initial stock for each product for today',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    itemCount: products.length,
-                    padding: const EdgeInsets.all(8),
-                    itemBuilder: (context, index) {
-                      final product = products[index];
-                      final id = product['id'];
-                      final controller = stockControllers[id] ?? TextEditingController();
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        child: ListTile(
-                          title: Text(product['name']),
-                          subtitle: Text('Unit: ${product['unit']}'),
-                          trailing: SizedBox(
-                            width: 100,
-                            child: TextField(
-                              controller: controller,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: 'Qty',
-                                border: OutlineInputBorder(),
-                              ),
-                              onChanged: (value) {
-                                // Update controller map (optional)
-                              },
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: isSaving ? null : saveStock,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+          : ListView.builder(
+              itemCount: products.length,
+              padding: const EdgeInsets.all(8),
+              itemBuilder: (context, index) {
+                final product = products[index];
+                final id = product['id'];
+                final controller = stockControllers[id]!;
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  child: ListTile(
+                    title: Text(product['name']),
+                    subtitle: Text('Unit: ${product['unit']}'),
+                    trailing: SizedBox(
+                      width: 100,
+                      child: TextField(
+                        controller: controller,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Qty',
+                          border: OutlineInputBorder(),
                         ),
                       ),
-                      child: isSaving
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text('Save Stock', style: TextStyle(fontSize: 18)),
                     ),
                   ),
-                ),
-              ],
+                );
+              },
             ),
     );
   }

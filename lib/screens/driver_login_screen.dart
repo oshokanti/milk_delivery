@@ -1,9 +1,9 @@
+import 'package:milk_delivery/screens/driver_dashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:local_auth/local_auth.dart';
-import 'package:milk_delivery/screens/driver_dashboard.dart'; // <-- added import
 
 class DriverLoginScreen extends StatefulWidget {
   const DriverLoginScreen({super.key});
@@ -11,7 +11,6 @@ class DriverLoginScreen extends StatefulWidget {
   @override
   State<DriverLoginScreen> createState() => _DriverLoginScreenState();
 }
-
 class _DriverLoginScreenState extends State<DriverLoginScreen> {
   final supabase = Supabase.instance.client;
   bool _isScanning = false;
@@ -233,17 +232,16 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   }
 
   // Helper to navigate with driver ID
-  void _navigateToDriverDashboard() {
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DriverDashboard(
-          driverId: _driverProfile!['id'], // <-- pass the ID
-        ),
+ void _navigateToDriverDashboard() {
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (context) => DriverDashboard(
+        driverId: _driverProfile!['id'],
       ),
-    );
-  }
-
+    ),
+  );
+}
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.red),
