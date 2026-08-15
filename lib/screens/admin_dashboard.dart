@@ -1,3 +1,4 @@
+import 'package:milk_delivery/screens/admin_reports_screen.dart';
 import 'package:milk_delivery/screens/admin_delivery_tracking_screen.dart';
 import 'package:milk_delivery/screens/driver_management_screen.dart';
 import 'package:flutter/material.dart';
@@ -99,6 +100,16 @@ _buildCard(
                 );
               },
             ),
+            _buildCard(
+  context,
+  icon: Icons.assessment,
+  label: 'Reports',
+  color: Colors.indigo,
+  onTap: () => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (context) => const AdminReportsScreen()),
+  ),
+),
             _buildCard(
               context,
               icon: Icons.assessment,

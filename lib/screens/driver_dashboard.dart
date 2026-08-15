@@ -1,10 +1,10 @@
-import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:realtime_client/realtime_client.dart' show PostgresChangeEvent, PostgresChangePayload;
 import 'package:milk_delivery/screens/shop_delivery_flow_screen.dart';
 import 'package:milk_delivery/screens/load_stock_screen.dart';
 
@@ -19,7 +19,9 @@ class DriverDashboard extends StatefulWidget {
 class _DriverDashboardState extends State<DriverDashboard> {
   final supabase = Supabase.instance.client;
   late Future<Map<String, dynamic>> _dataFuture;
-  Timer? _timer;
+
+  // Realtime channel for driver stock
+  RealtimeChannel? _stockChannel;
 
   // GPS & Nearby Shops
   Position? _currentPosition;
@@ -30,33 +32,72 @@ class _DriverDashboardState extends State<DriverDashboard> {
   static const double _mockLat = 19.0760;
   static const double _mockLng = 72.8777;
 
-  // Scanner
+  // QR Scanner
   bool _isScanning = false;
 
+  // ---------- LIFECYCLE ----------
   @override
   void initState() {
     super.initState();
     _dataFuture = _loadDriverData();
     _getCurrentLocation();
     _fetchAllShops();
-
-    // Auto-refresh every 30 seconds (fallback until Realtime works)
-    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      if (mounted) {
-        setState(() {
-          _dataFuture = _loadDriverData();
-        });
-      }
-    });
+    _subscribeToDriverStockChanges();
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _stockChannel?.unsubscribe();
+    _stockChannel = null;
     super.dispose();
   }
 
-  // ---------- GPS & Distance ----------
+  // ---------- REALTIME SUBSCRIPTION ----------
+  void _subscribeToDriverStockChanges() {
+    print('📡 Subscribing to driver_stock changes...');
+    _stockChannel = supabase.channel('driver_stock_changes');
+    _stockChannel!
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'driver_stock',
+          callback: (payload) => _handleDriverStockChange(payload),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'driver_stock',
+          callback: (payload) => _handleDriverStockChange(payload),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'driver_stock',
+          callback: (payload) => _handleDriverStockChange(payload),
+        )
+        .subscribe((status, error) {
+          if (error != null) {
+            print('❌ Driver stock Realtime error: $error');
+          } else {
+            print('✅ Subscribed to driver_stock_changes');
+          }
+        });
+  }
+
+  void _handleDriverStockChange(PostgresChangePayload payload) {
+    final newData = payload.newRecord;
+    final today = DateTime.now().toLocal().toString().split(' ')[0];
+    if (newData != null &&
+        newData['driver_id'] == widget.driverId &&
+        newData['date'] == today) {
+      print('🔄 Driver stock changed – refreshing...');
+      setState(() {
+        _dataFuture = _loadDriverData();
+      });
+    }
+  }
+
+  // ---------- GPS & DISTANCE ----------
   Future<void> _getCurrentLocation() async {
     setState(() => _isLoadingGps = true);
     try {
@@ -142,6 +183,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
     return R * c;
   }
 
+  // ---------- SHOPS ----------
   Future<void> _fetchAllShops() async {
     try {
       final data = await supabase.from('shopkeepers').select('*').order('shop_name');
@@ -192,7 +234,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
     });
   }
 
-  // ---------- QR Scanner ----------
+  // ---------- QR SCANNER ----------
   Future<void> _scanShopQR() async {
     setState(() => _isScanning = true);
     try {
@@ -270,7 +312,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
     );
   }
 
-  // ---------- Existing Dashboard Methods ----------
+  // ---------- LOAD DATA ----------
   Future<Map<String, dynamic>> _loadDriverData() async {
     try {
       final driverId = widget.driverId;
@@ -395,6 +437,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
     }
   }
 
+  // ---------- BUILD ----------
   @override
   Widget build(BuildContext context) {
     return Scaffold(

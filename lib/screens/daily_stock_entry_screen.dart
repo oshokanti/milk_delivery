@@ -1,6 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:realtime_client/realtime_client.dart' show PostgresChangeEvent, PostgresChangePayload;
 
 class DailyStockEntryScreen extends StatefulWidget {
   const DailyStockEntryScreen({super.key});
@@ -16,24 +16,61 @@ class _DailyStockEntryScreenState extends State<DailyStockEntryScreen> {
   bool isLoading = true;
   bool isSaving = false;
   String? today;
-  Timer? _timer;
+  RealtimeChannel? _stockChannel;
 
   @override
   void initState() {
     super.initState();
     today = DateTime.now().toIso8601String().split('T')[0];
     fetchData();
-    // Auto-refresh every 30 seconds (low compute)
-    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      if (mounted) fetchData();
-    });
+    _subscribeToStockChanges();
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _stockChannel?.unsubscribe();
+    _stockChannel = null;
     for (var controller in stockControllers.values) controller.dispose();
     super.dispose();
+  }
+
+  void _subscribeToStockChanges() {
+    print('📡 Subscribing to master_stock changes...');
+    _stockChannel = supabase.channel('master_stock_changes');
+    _stockChannel!
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'master_stock',
+          callback: (payload) => _handleStockChange(payload),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'master_stock',
+          callback: (payload) => _handleStockChange(payload),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.delete,
+          schema: 'public',
+          table: 'master_stock',
+          callback: (payload) => _handleStockChange(payload),
+        )
+        .subscribe((status, error) {
+          if (error != null) {
+            print('❌ Realtime error: $error');
+          } else {
+            print('✅ Subscribed to master_stock_changes');
+          }
+        });
+  }
+
+  void _handleStockChange(PostgresChangePayload payload) {
+    final newData = payload.newRecord;
+    if (newData != null && newData['date'] == today) {
+      print('🔄 Master stock changed – refreshing...');
+      fetchData();
+    }
   }
 
   Future<void> fetchData() async {
