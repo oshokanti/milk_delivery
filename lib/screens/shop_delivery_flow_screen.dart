@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show rootBundle;
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -630,47 +631,62 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
   }
 
   // ---------- Desktop Printing ----------
-  Future<void> _printReceiptDesktop(String receiptText) async {
-    try {
-      final pdf = pw.Document();
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.roll80,
-          build: (context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              children: [
-                pw.Text('MEDHYA FARM',
-                    style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
-                pw.SizedBox(height: 4),
-                pw.Text('Delivery Receipt',
-                    style: pw.TextStyle(fontSize: 14)),
-                pw.Divider(),
-                ...receiptText.split('\n').map((line) => pw.Text(line, style: pw.TextStyle(fontSize: 10))).toList(),
-                pw.Divider(),
-                pw.Text('Thank you!', style: pw.TextStyle(fontSize: 12)),
-              ],
-            );
-          },
-        ),
-      );
 
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save(),
-        name: 'Receipt.pdf',
-      );
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Receipt sent to printer!'), backgroundColor: Colors.green),
-      );
-    } catch (e) {
-      print('Print error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error printing: $e'), backgroundColor: Colors.red),
-      );
-    }
+Future<void> _printReceiptDesktop(String receiptText) async {
+  try {
+    // Use the pdf package's built-in DejaVu font
+    final ttf = pw.Font.ttf(await rootBundle.load('assets/fonts/DejaVuSans.ttf'));
+
+    // Clean the text
+    final cleanText = receiptText
+        .replaceAll('*', '')
+        .replaceAll('_', '')
+        .replaceAll(RegExp(r'[─━]'), '-')
+        .replaceAll('─────────────────────────', '------------------------');
+
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.roll80,
+        margin: const pw.EdgeInsets.all(10),
+        build: (context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              pw.Text('MEDHYA FARM',
+                  style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: ttf)),
+              pw.SizedBox(height: 2),
+              pw.Text('Delivery Receipt',
+                  style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, font: ttf)),
+              pw.Divider(thickness: 1, height: 8),
+              pw.Text(cleanText,
+                  style: pw.TextStyle(fontSize: 10, font: ttf),
+                  textAlign: pw.TextAlign.center),
+              pw.Divider(thickness: 1, height: 8),
+              pw.Text('Thank you for your business!',
+                  style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, font: ttf)),
+            ],
+          );
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'Receipt.pdf',
+    );
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Receipt sent to printer!'), backgroundColor: Colors.green),
+    );
+  } catch (e) {
+    print('Print error: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error printing: $e'), backgroundColor: Colors.red),
+    );
   }
-
+}
   // ---------- Final Printable Receipt ----------
  Future<void> _showFinalReceipt({required double amount, required String method}) async {
   print('📢 _showFinalReceipt called with amount: $amount, method: $method');
