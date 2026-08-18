@@ -43,6 +43,7 @@ dependencies:
   mobile_scanner: ^4.0.1
   local_auth: ^2.2.0
   shared_preferences: ^2.3.2
+  
 
   # Supabase for backend + real-time
   supabase_flutter: ^2.8.0

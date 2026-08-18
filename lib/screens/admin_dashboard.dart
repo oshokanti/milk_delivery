@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:milk_delivery/screens/product_list_screen.dart';
 import 'package:milk_delivery/screens/daily_stock_entry_screen.dart';
 import 'package:milk_delivery/screens/vehicle_management_screen.dart';
+import 'package:milk_delivery/screens/admin_payments_screen.dart';
 
 class AdminDashboard extends StatelessWidget {
   const AdminDashboard({super.key});
@@ -108,6 +109,16 @@ _buildCard(
   onTap: () => Navigator.push(
     context,
     MaterialPageRoute(builder: (context) => const AdminReportsScreen()),
+  ),
+),
+_buildCard(
+  context,
+  icon: Icons.payment,
+  label: 'Payments',
+  color: Colors.teal,
+  onTap: () => Navigator.push(
+    context,
+    MaterialPageRoute(builder: (context) => const AdminPaymentsScreen()),
   ),
 ),
             _buildCard(

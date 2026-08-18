@@ -7,6 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:realtime_client/realtime_client.dart' show PostgresChangeEvent, PostgresChangePayload;
 import 'package:milk_delivery/screens/shop_delivery_flow_screen.dart';
 import 'package:milk_delivery/screens/load_stock_screen.dart';
+import 'package:milk_delivery/screens/driver_payment_screen.dart';
 
 class DriverDashboard extends StatefulWidget {
   final String driverId;

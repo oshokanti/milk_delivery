@@ -1,11 +1,14 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // for Clipboard
+import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:barcode_widget/barcode_widget.dart';
 import 'package:barcode/barcode.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 
 class ShopDeliveryFlowScreen extends StatefulWidget {
   final Map<String, dynamic> delivery;
@@ -38,6 +41,7 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
   List<Map<String, dynamic>> _nearbyShops = [];
   bool _isSearching = false;
   String? _selectedShopkeeperId;
+  double _shopkeeperBalance = 0.0;
   final TextEditingController _searchController = TextEditingController();
 
   // ---- New Shop Form ----
@@ -56,7 +60,7 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
   bool _isLoadingProducts = true;
 
   // ---- Multi‑Step Flow ----
-  int _currentStep = 0; // 0: Order, 1: Returns question, 2: Return entry, 3: Confirm
+  int _currentStep = 0;
   bool _isSaving = false;
   List<Map<String, dynamic>> _orderItems = [];
   List<Map<String, dynamic>> _returnItems = [];
@@ -115,10 +119,12 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
 
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        setState(() {
-          _gpsError = 'Location services are disabled.';
-          _isLoadingGps = false;
-        });
+        if (mounted) {
+          setState(() {
+            _gpsError = 'Location services are disabled.';
+            _isLoadingGps = false;
+          });
+        }
         return;
       }
 
@@ -126,36 +132,44 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          setState(() {
-            _gpsError = 'Location permission denied.';
-            _isLoadingGps = false;
-          });
+          if (mounted) {
+            setState(() {
+              _gpsError = 'Location permission denied.';
+              _isLoadingGps = false;
+            });
+          }
           return;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
-        setState(() {
-          _gpsError = 'Location permission permanently denied.';
-          _isLoadingGps = false;
-        });
+        if (mounted) {
+          setState(() {
+            _gpsError = 'Location permission permanently denied.';
+            _isLoadingGps = false;
+          });
+        }
         return;
       }
 
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
-      setState(() {
-        _currentPosition = position;
-        _gpsError = null;
-        _isLoadingGps = false;
-      });
+      if (mounted) {
+        setState(() {
+          _currentPosition = position;
+          _gpsError = null;
+          _isLoadingGps = false;
+        });
+      }
       _filterNearbyShops();
     } catch (e) {
-      setState(() {
-        _gpsError = 'Error getting location: $e';
-        _isLoadingGps = false;
-      });
+      if (mounted) {
+        setState(() {
+          _gpsError = 'Error getting location: $e';
+          _isLoadingGps = false;
+        });
+      }
     }
   }
 
@@ -176,9 +190,11 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
   Future<void> _fetchAllShops() async {
     try {
       final data = await supabase.from('shopkeepers').select('*').order('shop_name');
-      setState(() {
-        _allShops = List<Map<String, dynamic>>.from(data);
-      });
+      if (mounted) {
+        setState(() {
+          _allShops = List<Map<String, dynamic>>.from(data);
+        });
+      }
       _filterNearbyShops();
     } catch (e) {
       print('⚠️ Error fetching shops: $e');
@@ -187,7 +203,9 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
 
   void _filterNearbyShops() {
     if (_currentPosition == null) {
-      setState(() => _nearbyShops = []);
+      if (mounted) {
+        setState(() => _nearbyShops = []);
+      }
       return;
     }
     const double radiusKm = 5.0;
@@ -218,9 +236,11 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
       );
       return d1.compareTo(d2);
     });
-    setState(() {
-      _nearbyShops = filtered;
-    });
+    if (mounted) {
+      setState(() {
+        _nearbyShops = filtered;
+      });
+    }
   }
 
   Future<void> _searchShopkeepers() async {
@@ -229,29 +249,39 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
       _filterNearbyShops();
       return;
     }
-    setState(() => _isSearching = true);
+    if (mounted) {
+      setState(() => _isSearching = true);
+    }
     try {
       final data = await supabase
           .from('shopkeepers')
           .select('*')
           .or('shop_name.ilike.%$query%,owner_name.ilike.%$query%,phone.ilike.%$query%')
           .order('shop_name');
-      setState(() {
-        _nearbyShops = List<Map<String, dynamic>>.from(data);
-        _isSearching = false;
-      });
+      if (mounted) {
+        setState(() {
+          _nearbyShops = List<Map<String, dynamic>>.from(data);
+          _isSearching = false;
+        });
+      }
     } catch (e) {
       print('❌ Search error: $e');
-      setState(() => _isSearching = false);
+      if (mounted) {
+        setState(() => _isSearching = false);
+      }
     }
   }
 
   void _selectShopkeeper(Map<String, dynamic> shop) {
-    setState(() {
-      _selectedShopkeeperId = shop['id'];
-      _isCreatingNew = false;
-      _resetFlow();
-    });
+    double balance = (shop['balance'] ?? 0).toDouble();
+    if (mounted) {
+      setState(() {
+        _selectedShopkeeperId = shop['id'];
+        _shopkeeperBalance = balance;
+        _isCreatingNew = false;
+        _resetFlow();
+      });
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Selected ${shop['shop_name']}'), backgroundColor: Colors.green),
     );
@@ -265,11 +295,15 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
           .eq('id', shopId)
           .maybeSingle();
       if (shop != null) {
-        setState(() {
-          _selectedShopkeeperId = shop['id'];
-          _searchController.text = shop['shop_name'] ?? '';
-          _resetFlow();
-        });
+        double balance = (shop['balance'] ?? 0).toDouble();
+        if (mounted) {
+          setState(() {
+            _selectedShopkeeperId = shop['id'];
+            _shopkeeperBalance = balance;
+            _searchController.text = shop['shop_name'] ?? '';
+            _resetFlow();
+          });
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Selected ${shop['shop_name']}'), backgroundColor: Colors.green),
         );
@@ -284,17 +318,20 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
   }
 
   void _startCreateNew() {
-    setState(() {
-      _isCreatingNew = true;
-      _selectedShopkeeperId = null;
-      _shopNameController.clear();
-      _ownerNameController.clear();
-      _phoneController.clear();
-      _addressController.clear();
-      _gstController.clear();
-      _newShopBarcodeId = null;
-      _resetFlow();
-    });
+    if (mounted) {
+      setState(() {
+        _isCreatingNew = true;
+        _selectedShopkeeperId = null;
+        _shopkeeperBalance = 0.0;
+        _shopNameController.clear();
+        _ownerNameController.clear();
+        _phoneController.clear();
+        _addressController.clear();
+        _gstController.clear();
+        _newShopBarcodeId = null;
+        _resetFlow();
+      });
+    }
   }
 
   Future<void> _createShopkeeper() async {
@@ -332,14 +369,17 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
 
       if (response == null) throw Exception('Failed to create shopkeeper');
 
-      setState(() {
-        _newShopBarcodeId = response['barcode_id'];
-        _selectedShopkeeperId = response['id'];
-        _isCreatingNew = false;
-        _allShops.add(response);
-        _filterNearbyShops();
-        _resetFlow();
-      });
+      if (mounted) {
+        setState(() {
+          _newShopBarcodeId = response['barcode_id'];
+          _selectedShopkeeperId = response['id'];
+          _shopkeeperBalance = 0.0;
+          _isCreatingNew = false;
+          _allShops.add(response);
+          _filterNearbyShops();
+          _resetFlow();
+        });
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('✅ Shopkeeper created!'), backgroundColor: Colors.green),
@@ -353,31 +393,39 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
 
   // ---------- Products ----------
   Future<void> _fetchProducts() async {
-    setState(() => _isLoadingProducts = true);
+    if (mounted) {
+      setState(() => _isLoadingProducts = true);
+    }
     try {
       final data = await supabase.from('products').select('*').order('name');
-      setState(() {
-        _products = List<Map<String, dynamic>>.from(data);
-        for (var p in _products) {
-          final id = p['id'];
-          _orderControllers[id] = TextEditingController(text: '0');
-          _returnControllers[id] = TextEditingController(text: '0');
-        }
-        _isLoadingProducts = false;
-      });
+      if (mounted) {
+        setState(() {
+          _products = List<Map<String, dynamic>>.from(data);
+          for (var p in _products) {
+            final id = p['id'];
+            _orderControllers[id] = TextEditingController(text: '0');
+            _returnControllers[id] = TextEditingController(text: '0');
+          }
+          _isLoadingProducts = false;
+        });
+      }
     } catch (e) {
       print('❌ Error loading products: $e');
-      setState(() => _isLoadingProducts = false);
+      if (mounted) {
+        setState(() => _isLoadingProducts = false);
+      }
     }
   }
 
-  // ---------- Multi‑Step Flow Methods ----------
+  // ---------- Multi‑Step Flow ----------
   void _resetFlow() {
-    setState(() {
-      _currentStep = 0;
-      _orderItems = [];
-      _returnItems = [];
-    });
+    if (mounted) {
+      setState(() {
+        _currentStep = 0;
+        _orderItems = [];
+        _returnItems = [];
+      });
+    }
     for (var p in _products) {
       final id = p['id'];
       _orderControllers[id]?.text = '0';
@@ -405,17 +453,23 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
       );
       return;
     }
-    setState(() {
-      _orderItems = items;
-      _currentStep = 1;
-    });
+    if (mounted) {
+      setState(() {
+        _orderItems = items;
+        _currentStep = 1;
+      });
+    }
   }
 
   void _handleReturns(bool hasReturns) {
-    if (hasReturns) {
-      setState(() => _currentStep = 2);
-    } else {
-      setState(() => _currentStep = 3);
+    if (mounted) {
+      setState(() {
+        if (hasReturns) {
+          _currentStep = 2;
+        } else {
+          _currentStep = 3;
+        }
+      });
     }
   }
 
@@ -431,78 +485,309 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
         });
       }
     }
-    setState(() {
-      _returnItems = items;
-      _currentStep = 3;
-    });
-  }
-Future<void> _deductMasterStock(List<Map<String, dynamic>> orderItems) async {
-  final today = DateTime.now().toLocal().toString().split(' ')[0];
-  print('🔍 Deducing master stock for today: $today');
-  for (var item in orderItems) {
-    final productId = item['product_id'];
-    final productName = item['name'];
-    final qty = item['quantity'] as int;
-    print('🔍 Deducting $qty of $productName (ID: $productId)');
-    final masterRecord = await supabase
-        .from('master_stock')
-        .select('id, remaining_quantity')
-        .eq('product_id', productId)
-        .eq('date', today)
-        .maybeSingle();
-    if (masterRecord == null) {
-      print('❌ No master stock found for $productName (ID: $productId)');
-      throw Exception('Master stock not found for product $productName');
-    }
-    final current = masterRecord['remaining_quantity'] as int;
-    final newStock = current - qty;
-    if (newStock < 0) throw Exception('Insufficient master stock for $productName');
-    print('✅ Updating master stock: $current -> $newStock');
-    await supabase
-        .from('master_stock')
-        .update({'remaining_quantity': newStock})
-        .eq('id', masterRecord['id']);
-        // After the update
-final afterUpdate = await supabase
-    .from('master_stock')
-    .select('remaining_quantity')
-    .eq('id', masterRecord['id'])
-    .maybeSingle();
-print('🔍 After update, remaining_quantity = ${afterUpdate?['remaining_quantity']}');
-  }
-}
-Future<void> _addReturnsToMasterStock(List<Map<String, dynamic>> returnItems) async {
-  final today = DateTime.now().toLocal().toString().split(' ')[0];
-  for (var item in returnItems) {
-    final productId = item['product_id'];
-    final qty = item['quantity'] as int;
-    final masterRecord = await supabase
-        .from('master_stock')
-        .select('id, remaining_quantity')
-        .eq('product_id', productId)
-        .eq('date', today)
-        .maybeSingle();
-    if (masterRecord != null) {
-      final currentRemaining = masterRecord['remaining_quantity'] as int;
-      final newRemaining = currentRemaining + qty;
-      await supabase
-          .from('master_stock')
-          .update({'remaining_quantity': newRemaining})
-          .eq('id', masterRecord['id']);
-    } else {
-      // If no master stock exists, we can create one with 0 initial and add returns (but better to throw)
-      throw Exception('Master stock not found for return product. Please contact admin.');
+    if (mounted) {
+      setState(() {
+        _returnItems = items;
+        _currentStep = 3;
+      });
     }
   }
-}
 
-  // ---------- Receipt Dialog ----------
-  Future<void> _showReceiptDialog() async {
-    // _selectedShopkeeperId is guaranteed non-null here
+  // ---------- Payment Collection ----------
+  Future<void> _collectPayment({double? defaultAmount}) async {
+    if (defaultAmount == null || defaultAmount <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No amount due.'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    final totalPayable = _shopkeeperBalance;
+    final TextEditingController amountController = TextEditingController(
+      text: totalPayable.toStringAsFixed(2),
+    );
+    String selectedMethod = 'cash';
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text('Collect Payment'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Expanded(
+                    flex: 2,
+                    child: Text('Total Outstanding:'),
+                  ),
+                  Expanded(
+                    flex: 1,
+                    child: Text(
+                      '₹${totalPayable.toStringAsFixed(2)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: selectedMethod,
+                items: const [
+                  DropdownMenuItem(value: 'cash', child: Text('Cash')),
+                  DropdownMenuItem(value: 'upi', child: Text('UPI')),
+                  DropdownMenuItem(value: 'online', child: Text('Online')),
+                ],
+                onChanged: (value) {
+                  if (value != null) selectedMethod = value;
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Payment Mode',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: amountController,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Amount Received (0 for no payment)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () async {
+                final amount = double.tryParse(amountController.text.trim()) ?? 0;
+                if (amount < 0) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Amount cannot be negative'), backgroundColor: Colors.orange),
+                  );
+                  return;
+                }
+                if (amount > totalPayable) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('Amount exceeds total outstanding'), backgroundColor: Colors.orange),
+                  );
+                  return;
+                }
+
+                if (amount > 0) {
+                  try {
+                    await supabase.from('transactions').insert({
+                      'shopkeeper_id': _selectedShopkeeperId!,
+                      'amount': amount,
+                      'method': selectedMethod,
+                      'collected_by': widget.driverId,
+                      'collected_at': DateTime.now().toUtc().toIso8601String(),
+                    });
+                    final newBalance = _shopkeeperBalance - amount;
+                    await supabase
+                        .from('shopkeepers')
+                        .update({'balance': newBalance})
+                        .eq('id', _selectedShopkeeperId!);
+                    if (mounted) {
+                      setState(() {
+                        _shopkeeperBalance = newBalance;
+                      });
+                    }
+                  } catch (e) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                    );
+                    return;
+                  }
+                } else {
+                  ScaffoldMessenger.of(ctx).showSnackBar(
+                    const SnackBar(content: Text('No payment collected. Balance updated.')),
+                  );
+                }
+
+                // Pop the payment dialog
+                Navigator.pop(ctx);
+                print('💳 Payment dialog popped, amount: $amount, method: $selectedMethod');
+
+                // Use WidgetsBinding to schedule the final receipt after the dialog is fully dismissed
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    print('📢 Calling _showFinalReceipt via WidgetsBinding...');
+                    _showFinalReceipt(amount: amount, method: selectedMethod);
+                  } else {
+                    print('❌ Widget not mounted, cannot show final receipt');
+                  }
+                });
+              },
+              child: const Text('Confirm Payment'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // ---------- Desktop Printing ----------
+  Future<void> _printReceiptDesktop(String receiptText) async {
+    try {
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.roll80,
+          build: (context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text('MEDHYA FARM',
+                    style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 4),
+                pw.Text('Delivery Receipt',
+                    style: pw.TextStyle(fontSize: 14)),
+                pw.Divider(),
+                ...receiptText.split('\n').map((line) => pw.Text(line, style: pw.TextStyle(fontSize: 10))).toList(),
+                pw.Divider(),
+                pw.Text('Thank you!', style: pw.TextStyle(fontSize: 12)),
+              ],
+            );
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+        name: 'Receipt.pdf',
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Receipt sent to printer!'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      print('Print error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error printing: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  // ---------- Final Printable Receipt ----------
+ Future<void> _showFinalReceipt({required double amount, required String method}) async {
+  print('📢 _showFinalReceipt called with amount: $amount, method: $method');
+  try {
     final shop = await supabase
         .from('shopkeepers')
         .select('shop_name, phone, address')
-        .eq('id', _selectedShopkeeperId!) // FIXED: added !
+        .eq('id', _selectedShopkeeperId!)
+        .maybeSingle();
+
+    final shopName = shop?['shop_name'] ?? 'Unknown Shop';
+    final shopPhone = shop?['phone'] ?? '';
+    final shopAddress = shop?['address'] ?? '';
+
+    double orderTotal = 0;
+    double returnTotal = 0;
+    for (var item in _orderItems) {
+      orderTotal += (item['price'] as num) * (item['quantity'] as int);
+    }
+    for (var item in _returnItems) {
+      final product = _products.firstWhere(
+        (p) => p['id'] == item['product_id'],
+        orElse: () => {'price': 0},
+      );
+      returnTotal += (product['price'] as num) * (item['quantity'] as int);
+    }
+    final netAmount = orderTotal - returnTotal;
+    // Calculate previous balance: current balance (after payment) - netAmount + amountPaid
+    final previousBalance = _shopkeeperBalance - netAmount + amount;
+    final amountPaid = amount;
+    final newBalance = _shopkeeperBalance; // already after payment
+
+    final now = DateTime.now().toLocal();
+    final receipt = '''
+🧾 *FINAL RECEIPT*
+─────────────────────────
+Shop: $shopName
+Phone: $shopPhone
+Date: ${now.toLocal().toString().split(' ')[0]}
+Time: ${now.hour.toString().padLeft(2,'0')}:${now.minute.toString().padLeft(2,'0')}
+─────────────────────────
+*ORDER ITEMS*
+${_orderItems.map((item) => '  ${item['name']} × ${item['quantity']} = ₹${(item['price'] as num) * (item['quantity'] as int)}').join('\n')}
+${_orderItems.isEmpty ? '  (none)' : ''}
+─────────────────────────
+*RETURNS*
+${_returnItems.map((item) {
+  final product = _products.firstWhere(
+    (p) => p['id'] == item['product_id'],
+    orElse: () => {'name': 'Unknown', 'price': 0},
+  );
+  return '  ${product['name']} × ${item['quantity']}';
+}).join('\n')}
+${_returnItems.isEmpty ? '  (none)' : ''}
+─────────────────────────
+*ORDER TOTAL: ₹${orderTotal.toStringAsFixed(2)}*
+*RETURN TOTAL: ₹${returnTotal.toStringAsFixed(2)}*
+*NET AMOUNT: ₹${netAmount.toStringAsFixed(2)}*
+*PREVIOUS BALANCE: ₹${previousBalance.toStringAsFixed(2)}*
+*AMOUNT PAID: ₹${amountPaid.toStringAsFixed(2)}*
+*NEW BALANCE: ₹${newBalance.toStringAsFixed(2)}*
+─────────────────────────
+Payment Method: $method
+Thank you for your business!
+''';
+
+    print('📄 Final receipt generated, showing dialog...');
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Final Receipt'),
+        content: SingleChildScrollView(
+          child: Text(
+            receipt,
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: receipt));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Receipt copied to clipboard!'), backgroundColor: Colors.green),
+              );
+            },
+            child: const Text('Copy'),
+          ),
+          TextButton(
+            onPressed: () => _printReceiptDesktop(receipt),
+            child: const Text('Print', style: TextStyle(color: Colors.blue)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+    print('✅ Final receipt dialog closed.');
+    if (mounted) {
+      Navigator.pop(context, true);
+    }
+  } catch (e) {
+    print('❌ Error in _showFinalReceipt: $e');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error showing receipt: $e'), backgroundColor: Colors.red),
+    );
+  }
+}
+
+  // ---------- Initial Receipt Dialog ----------
+  Future<void> _showReceiptDialog() async {
+    final shop = await supabase
+        .from('shopkeepers')
+        .select('shop_name, phone, address')
+        .eq('id', _selectedShopkeeperId!)
         .maybeSingle();
 
     final shopName = shop?['shop_name'] ?? 'Unknown Shop';
@@ -523,6 +808,8 @@ Future<void> _addReturnsToMasterStock(List<Map<String, dynamic>> returnItems) as
     }
 
     final netAmount = orderTotal - returnTotal;
+    final previousBalance = _shopkeeperBalance - netAmount;
+    final totalPayable = _shopkeeperBalance;
 
     final now = DateTime.now().toLocal();
     final receipt = '''
@@ -549,7 +836,9 @@ ${_returnItems.isEmpty ? '  (none)' : ''}
 ─────────────────────────
 *ORDER TOTAL: ₹${orderTotal.toStringAsFixed(2)}*
 *RETURN TOTAL: ₹${returnTotal.toStringAsFixed(2)}*
-*NET AMOUNT DUE: ₹${netAmount.toStringAsFixed(2)}*
+*NET AMOUNT: ₹${netAmount.toStringAsFixed(2)}*
+*PREVIOUS BALANCE: ₹${previousBalance.toStringAsFixed(2)}*
+*TOTAL OUTSTANDING: ₹${totalPayable.toStringAsFixed(2)}*
 ─────────────────────────
 Thank you for your business!
 ''';
@@ -567,10 +856,6 @@ Thank you for your business!
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-          TextButton(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: receipt));
               ScaffoldMessenger.of(context).showSnackBar(
@@ -579,147 +864,235 @@ Thank you for your business!
             },
             child: const Text('Copy'),
           ),
+          TextButton(
+            onPressed: () {
+              if (mounted) {
+                Navigator.pop(context);
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  _collectPayment(defaultAmount: totalPayable);
+                });
+              }
+            },
+            child: const Text('Collect Payment', style: TextStyle(color: Colors.green)),
+          ),
         ],
       ),
     );
   }
 
   // ---------- Confirm Delivery ----------
- Future<void> _finalConfirmDelivery() async {
-  if (_selectedShopkeeperId == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Please select or create a shopkeeper'), backgroundColor: Colors.orange),
-    );
-    return;
-  }
-
-  if (_orderItems.isEmpty && _returnItems.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('No order or return items to confirm'), backgroundColor: Colors.orange),
-    );
-    return;
-  }
-
-  setState(() => _isSaving = true);
-
-  try {
-    // 1. Deduct master stock for orders (if any)
-    if (_orderItems.isNotEmpty) {
-      await _deductMasterStock(_orderItems);
+  Future<void> _finalConfirmDelivery() async {
+    if (_selectedShopkeeperId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select or create a shopkeeper'), backgroundColor: Colors.orange),
+      );
+      return;
     }
 
-    // 2. Deduct driver stock for orders (as before)
-    if (_orderItems.isNotEmpty) {
-      final today = DateTime.now().toLocal().toString().split(' ')[0];
-      for (var item in _orderItems) {
-        final productId = item['product_id'];
-        final qty = item['quantity'] as int;
-        final stockRecord = await supabase
-            .from('driver_stock')
-            .select('id, quantity_loaded')
-            .eq('driver_id', widget.driverId)
-            .eq('product_id', productId)
-            .eq('date', today)
-            .maybeSingle();
-        if (stockRecord != null) {
-          final currentStock = stockRecord['quantity_loaded'] as int;
-          final newStock = currentStock - qty;
-          if (newStock < 0) throw Exception('Insufficient driver stock');
-          await supabase
+    if (_orderItems.isEmpty && _returnItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No order or return items to confirm'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _isSaving = true);
+    }
+
+    try {
+      // Deduct master stock (orders)
+      if (_orderItems.isNotEmpty) {
+        await _deductMasterStock(_orderItems);
+      }
+
+      // Deduct driver stock (orders)
+      if (_orderItems.isNotEmpty) {
+        final today = DateTime.now().toLocal().toString().split(' ')[0];
+        for (var item in _orderItems) {
+          final productId = item['product_id'];
+          final qty = item['quantity'] as int;
+          final stockRecord = await supabase
               .from('driver_stock')
-              .update({'quantity_loaded': newStock})
-              .eq('id', stockRecord['id']);
-        } else {
-          throw Exception('Driver stock not found');
+              .select('id, quantity_loaded')
+              .eq('driver_id', widget.driverId)
+              .eq('product_id', productId)
+              .eq('date', today)
+              .maybeSingle();
+          if (stockRecord != null) {
+            final currentStock = stockRecord['quantity_loaded'] as int;
+            final newStock = currentStock - qty;
+            if (newStock < 0) throw Exception('Insufficient driver stock');
+            await supabase
+                .from('driver_stock')
+                .update({'quantity_loaded': newStock})
+                .eq('id', stockRecord['id']);
+          } else {
+            throw Exception('Driver stock not found');
+          }
         }
       }
-    }
 
-    // 3. Add returns to driver stock (as before)
-    if (_returnItems.isNotEmpty) {
-      final today = DateTime.now().toLocal().toString().split(' ')[0];
-      for (var item in _returnItems) {
-        final productId = item['product_id'];
-        final qty = item['quantity'] as int;
-        final stockRecord = await supabase
-            .from('driver_stock')
-            .select('id, quantity_loaded')
-            .eq('driver_id', widget.driverId)
-            .eq('product_id', productId)
-            .eq('date', today)
-            .maybeSingle();
-        if (stockRecord != null) {
-          final currentStock = stockRecord['quantity_loaded'] as int;
-          final newStock = currentStock + qty;
-          await supabase
+      // Add returns to driver stock
+      if (_returnItems.isNotEmpty) {
+        final today = DateTime.now().toLocal().toString().split(' ')[0];
+        for (var item in _returnItems) {
+          final productId = item['product_id'];
+          final qty = item['quantity'] as int;
+          final stockRecord = await supabase
               .from('driver_stock')
-              .update({'quantity_loaded': newStock})
-              .eq('id', stockRecord['id']);
-        } else {
-          await supabase.from('driver_stock').insert({
-            'driver_id': widget.driverId,
-            'product_id': productId,
-            'quantity_loaded': qty,
-            'date': today,
-          });
+              .select('id, quantity_loaded')
+              .eq('driver_id', widget.driverId)
+              .eq('product_id', productId)
+              .eq('date', today)
+              .maybeSingle();
+          if (stockRecord != null) {
+            final currentStock = stockRecord['quantity_loaded'] as int;
+            final newStock = currentStock + qty;
+            await supabase
+                .from('driver_stock')
+                .update({'quantity_loaded': newStock})
+                .eq('id', stockRecord['id']);
+          } else {
+            await supabase.from('driver_stock').insert({
+              'driver_id': widget.driverId,
+              'product_id': productId,
+              'quantity_loaded': qty,
+              'date': today,
+            });
+          }
         }
       }
-    }
 
-    // 4. Add returns to master stock (new)
-    if (_returnItems.isNotEmpty) {
-      await _addReturnsToMasterStock(_returnItems);
-    }
+      // Add returns to master stock
+      if (_returnItems.isNotEmpty) {
+        await _addReturnsToMasterStock(_returnItems);
+      }
 
-    // 5. Update or insert delivery record
-    final deliveryData = {
-      'status': 'delivered',
-      'shopkeeper_id': _selectedShopkeeperId,
-      'items': _orderItems,
-      'returns': _returnItems,
-      'delivered_at': DateTime.now().toUtc().toIso8601String(),
-    };
-
-    final bool isNewDelivery = widget.delivery['id'] == 'new';
-    if (isNewDelivery) {
-      final shopName = (await supabase
-          .from('shopkeepers')
-          .select('shop_name')
-          .eq('id', _selectedShopkeeperId!)
-          .maybeSingle())?['shop_name'] ?? 'Unknown Shop';
-      final address = (await supabase
-          .from('shopkeepers')
-          .select('address')
-          .eq('id', _selectedShopkeeperId!)
-          .maybeSingle())?['address'] ?? '';
-      final newDeliveryData = {
-        ...deliveryData,
-        'driver_id': widget.driverId,
-        'scheduled_date': DateTime.now().toLocal().toString().split(' ')[0],
-        'shop_name': shopName,
-        'address': address,
+      // Update or insert delivery record
+      final deliveryData = {
+        'status': 'delivered',
+        'shopkeeper_id': _selectedShopkeeperId,
+        'items': _orderItems,
+        'returns': _returnItems,
+        'delivered_at': DateTime.now().toUtc().toIso8601String(),
       };
-      await supabase.from('deliveries').insert(newDeliveryData);
-    } else {
+
+      final bool isNewDelivery = widget.delivery['id'] == 'new';
+      if (isNewDelivery) {
+        final shopName = (await supabase
+            .from('shopkeepers')
+            .select('shop_name')
+            .eq('id', _selectedShopkeeperId!)
+            .maybeSingle())?['shop_name'] ?? 'Unknown Shop';
+        final address = (await supabase
+            .from('shopkeepers')
+            .select('address')
+            .eq('id', _selectedShopkeeperId!)
+            .maybeSingle())?['address'] ?? '';
+        final newDeliveryData = {
+          ...deliveryData,
+          'driver_id': widget.driverId,
+          'scheduled_date': DateTime.now().toLocal().toString().split(' ')[0],
+          'shop_name': shopName,
+          'address': address,
+        };
+        await supabase.from('deliveries').insert(newDeliveryData);
+      } else {
+        await supabase
+            .from('deliveries')
+            .update(deliveryData)
+            .eq('id', widget.delivery['id']);
+      }
+
+      // Update shopkeeper balance
+      double orderTotal = 0;
+      double returnTotal = 0;
+      for (var item in _orderItems) {
+        orderTotal += (item['price'] as num) * (item['quantity'] as int);
+      }
+      for (var item in _returnItems) {
+        final product = _products.firstWhere(
+          (p) => p['id'] == item['product_id'],
+          orElse: () => {'price': 0},
+        );
+        returnTotal += (product['price'] as num) * (item['quantity'] as int);
+      }
+      final netAmount = orderTotal - returnTotal;
+      final currentBalance = _shopkeeperBalance;
+      final newBalance = currentBalance + netAmount;
       await supabase
-          .from('deliveries')
-          .update(deliveryData)
-          .eq('id', widget.delivery['id']);
+          .from('shopkeepers')
+          .update({'balance': newBalance})
+          .eq('id', _selectedShopkeeperId!);
+      if (mounted) {
+        setState(() {
+          _shopkeeperBalance = newBalance;
+        });
+      }
+
+      // Show receipt – do NOT pop the screen here
+      await _showReceiptDialog();
+
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
-
-    // 6. Show receipt
-    await _showReceiptDialog();
-
-    // 7. Pop to dashboard
-    Navigator.pop(context, true);
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
-    );
-  } finally {
-    setState(() => _isSaving = false);
   }
-}
+
+  // ---------- Master Stock Helpers ----------
+  Future<void> _deductMasterStock(List<Map<String, dynamic>> orderItems) async {
+    final today = DateTime.now().toLocal().toString().split(' ')[0];
+    for (var item in orderItems) {
+      final productId = item['product_id'];
+      final productName = item['name'];
+      final qty = item['quantity'] as int;
+      final masterRecord = await supabase
+          .from('master_stock')
+          .select('id, remaining_quantity')
+          .eq('product_id', productId)
+          .eq('date', today)
+          .maybeSingle();
+      if (masterRecord == null) {
+        throw Exception('Master stock not found for product $productName.');
+      }
+      final current = masterRecord['remaining_quantity'] as int;
+      final newStock = current - qty;
+      if (newStock < 0) throw Exception('Insufficient master stock for $productName');
+      await supabase
+          .from('master_stock')
+          .update({'remaining_quantity': newStock})
+          .eq('id', masterRecord['id']);
+    }
+  }
+
+  Future<void> _addReturnsToMasterStock(List<Map<String, dynamic>> returnItems) async {
+    final today = DateTime.now().toLocal().toString().split(' ')[0];
+    for (var item in returnItems) {
+      final productId = item['product_id'];
+      final qty = item['quantity'] as int;
+      final masterRecord = await supabase
+          .from('master_stock')
+          .select('id, remaining_quantity')
+          .eq('product_id', productId)
+          .eq('date', today)
+          .maybeSingle();
+      if (masterRecord != null) {
+        final current = masterRecord['remaining_quantity'] as int;
+        final newStock = current + qty;
+        await supabase
+            .from('master_stock')
+            .update({'remaining_quantity': newStock})
+            .eq('id', masterRecord['id']);
+      }
+    }
+  }
+
   // ---------- UI ----------
   @override
   Widget build(BuildContext context) {
@@ -743,7 +1116,7 @@ Thank you for your business!
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ---- GPS ----
+            // GPS
             Card(
               elevation: 3,
               child: Padding(
@@ -776,7 +1149,7 @@ Thank you for your business!
             ),
             const SizedBox(height: 16),
 
-            // ---- Shopkeeper ----
+            // Shopkeeper
             const Text('Shopkeeper', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
 
@@ -1140,7 +1513,6 @@ Thank you for your business!
     );
   }
 
-  // Helper for step indicators
   Widget _buildStepIndicator(String label, bool active) {
     return Expanded(
       child: Column(
