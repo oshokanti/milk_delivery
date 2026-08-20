@@ -35,6 +35,15 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Medhya Farm',
       theme: ThemeData(
+        // Use a consistent font family (you can replace 'Roboto' with any font you have)
+        // If you don't have the font, remove the line below or use a fallback.
+        fontFamily: 'Roboto',
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(fontSize: 16),
+          bodyMedium: TextStyle(fontSize: 14),
+          labelLarge: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
         primarySwatch: Colors.blue,
         useMaterial3: true,
       ),

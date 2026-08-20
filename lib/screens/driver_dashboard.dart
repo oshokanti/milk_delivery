@@ -7,7 +7,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:realtime_client/realtime_client.dart' show PostgresChangeEvent, PostgresChangePayload;
 import 'package:milk_delivery/screens/shop_delivery_flow_screen.dart';
 import 'package:milk_delivery/screens/load_stock_screen.dart';
-import 'package:milk_delivery/screens/driver_payment_screen.dart';
+import 'package:milk_delivery/screens/login_screen.dart';
 
 class DriverDashboard extends StatefulWidget {
   final String driverId;
@@ -21,7 +21,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
   final supabase = Supabase.instance.client;
   late Future<Map<String, dynamic>> _dataFuture;
 
-  // Realtime channel for driver stock
   RealtimeChannel? _stockChannel;
 
   // GPS & Nearby Shops
@@ -33,10 +32,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
   static const double _mockLat = 19.0760;
   static const double _mockLng = 72.8777;
 
-  // QR Scanner
   bool _isScanning = false;
 
-  // ---------- LIFECYCLE ----------
   @override
   void initState() {
     super.initState();
@@ -53,7 +50,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
     super.dispose();
   }
 
-  // ---------- REALTIME SUBSCRIPTION ----------
   void _subscribeToDriverStockChanges() {
     print('📡 Subscribing to driver_stock changes...');
     _stockChannel = supabase.channel('driver_stock_changes');
@@ -98,7 +94,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
     }
   }
 
-  // ---------- GPS & DISTANCE ----------
   Future<void> _getCurrentLocation() async {
     setState(() => _isLoadingGps = true);
     try {
@@ -184,7 +179,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
     return R * c;
   }
 
-  // ---------- SHOPS ----------
   Future<void> _fetchAllShops() async {
     try {
       final data = await supabase.from('shopkeepers').select('*').order('shop_name');
@@ -235,7 +229,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
     });
   }
 
-  // ---------- QR SCANNER ----------
   Future<void> _scanShopQR() async {
     setState(() => _isScanning = true);
     try {
@@ -313,7 +306,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
     );
   }
 
-  // ---------- LOAD DATA ----------
   Future<Map<String, dynamic>> _loadDriverData() async {
     try {
       final driverId = widget.driverId;
@@ -438,325 +430,377 @@ class _DriverDashboardState extends State<DriverDashboard> {
     }
   }
 
-  // ---------- BUILD ----------
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Driver Dashboard'),
-        backgroundColor: Colors.blue,
-        foregroundColor: Colors.white,
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => Navigator.pushReplacementNamed(context, '/'),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _dataFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  const SizedBox(height: 16),
-                  Text('Error: ${snapshot.error}'),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _dataFuture = _loadDriverData();
-                      });
-                    },
-                    child: const Text('Retry'),
-                  ),
-                ],
+    );
+    if (confirm == true) {
+      await supabase.auth.signOut();
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return WillPopScope(
+      onWillPop: () async {
+        // Show confirmation dialog before exiting
+        final shouldExit = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Exit App?'),
+            content: const Text('Are you sure you want to logout?'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
               ),
-            );
-          }
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Logout', style: TextStyle(color: Colors.red)),
+              ),
+            ],
+          ),
+        );
+        if (shouldExit == true) {
+          await supabase.auth.signOut();
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+            (route) => false,
+          );
+          return true;
+        }
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Driver Dashboard'),
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: _logout,
+              tooltip: 'Logout',
+            ),
+          ],
+        ),
+        body: FutureBuilder<Map<String, dynamic>>(
+          future: _dataFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                    const SizedBox(height: 16),
+                    Text('Error: ${snapshot.error}'),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _dataFuture = _loadDriverData();
+                        });
+                      },
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              );
+            }
 
-          final data = snapshot.data!;
-          final driverName = data['driverName'] as String? ?? 'Driver';
-          final deliveries = (data['deliveries'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-          final pendingCount = data['pendingCount'] as int? ?? 0;
-          final deliveredCount = data['deliveredCount'] as int? ?? 0;
-          final stockItems = (data['stockItems'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-          final activeSession = data['activeSession'] as Map?;
-          final bool isActive = activeSession != null;
+            final data = snapshot.data!;
+            final driverName = data['driverName'] as String? ?? 'Driver';
+            final deliveries = (data['deliveries'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+            final pendingCount = data['pendingCount'] as int? ?? 0;
+            final deliveredCount = data['deliveredCount'] as int? ?? 0;
+            final stockItems = (data['stockItems'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+            final activeSession = data['activeSession'] as Map?;
+            final bool isActive = activeSession != null;
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              await _getCurrentLocation();
-              await _fetchAllShops();
-              setState(() {
-                _dataFuture = _loadDriverData();
-              });
-              await _dataFuture;
-            },
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Welcome
-                  Text('Welcome, $driverName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 4),
-                  Text('Today: ${DateTime.now().toLocal().toString().split(' ')[0]}',
-                      style: const TextStyle(fontSize: 16, color: Colors.grey)),
-                  const SizedBox(height: 16),
+            return RefreshIndicator(
+              onRefresh: () async {
+                await _getCurrentLocation();
+                await _fetchAllShops();
+                setState(() {
+                  _dataFuture = _loadDriverData();
+                });
+                await _dataFuture;
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Welcome, $driverName', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text('Today: ${DateTime.now().toLocal().toString().split(' ')[0]}',
+                        style: const TextStyle(fontSize: 16, color: Colors.grey)),
+                    const SizedBox(height: 16),
 
-                  // Stock in Vehicle
-                  const Text('Stock in Vehicle', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  stockItems.isEmpty
-                      ? const Text('No stock loaded today', style: TextStyle(color: Colors.grey))
-                      : Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: stockItems.map((item) {
-                            final product = item['products'] as Map? ?? {};
-                            final name = product['name'] ?? 'Unknown';
-                            final quantity = item['quantity_loaded'] as int? ?? 0;
-                            final unit = product['unit'] ?? '';
-                            final colors = [Colors.blue.shade100, Colors.teal.shade100, Colors.green.shade100, Colors.orange.shade100, Colors.purple.shade100, Colors.pink.shade100, Colors.indigo.shade100, Colors.lime.shade100];
-                            final Color bgColor = colors[stockItems.indexOf(item) % colors.length];
-                            final Color accentColor = bgColor.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
-                            return Expanded(
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 4),
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: bgColor,
-                                  borderRadius: BorderRadius.circular(16),
-                                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), spreadRadius: 2, blurRadius: 6)],
+                    const Text('Stock in Vehicle', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    stockItems.isEmpty
+                        ? const Text('No stock loaded today', style: TextStyle(color: Colors.grey))
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: stockItems.map((item) {
+                              final product = item['products'] as Map? ?? {};
+                              final name = product['name'] ?? 'Unknown';
+                              final quantity = item['quantity_loaded'] as int? ?? 0;
+                              final unit = product['unit'] ?? '';
+                              final colors = [Colors.blue.shade100, Colors.teal.shade100, Colors.green.shade100, Colors.orange.shade100, Colors.purple.shade100, Colors.pink.shade100, Colors.indigo.shade100, Colors.lime.shade100];
+                              final Color bgColor = colors[stockItems.indexOf(item) % colors.length];
+                              final Color accentColor = bgColor.computeLuminance() > 0.5 ? Colors.black87 : Colors.white;
+                              return Expanded(
+                                child: Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: bgColor,
+                                    borderRadius: BorderRadius.circular(16),
+                                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), spreadRadius: 2, blurRadius: 6)],
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text('$quantity', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: accentColor)),
+                                      const SizedBox(height: 4),
+                                      Text(name, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: accentColor.withOpacity(0.8)), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
+                                      if (unit.isNotEmpty) Text(unit, style: TextStyle(fontSize: 10, color: accentColor.withOpacity(0.6))),
+                                    ],
+                                  ),
                                 ),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text('$quantity', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: accentColor)),
-                                    const SizedBox(height: 4),
-                                    Text(name, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: accentColor.withOpacity(0.8)), textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis),
-                                    if (unit.isNotEmpty) Text(unit, style: TextStyle(fontSize: 10, color: accentColor.withOpacity(0.6))),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                  const SizedBox(height: 16),
+                              );
+                            }).toList(),
+                          ),
+                    const SizedBox(height: 16),
 
-                  // Session status
-                  if (isActive) ...[
+                    if (isActive) ...[
+                      Row(
+                        children: [
+                          const Icon(Icons.circle, color: Colors.green, size: 12),
+                          const SizedBox(width: 8),
+                          Text('🟢 Active since ${_formatTime(activeSession!['start_time'])}',
+                              style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w500)),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+
+                    const SizedBox(height: 8),
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Icon(Icons.circle, color: Colors.green, size: 12),
-                        const SizedBox(width: 8),
-                        Text('🟢 Active since ${_formatTime(activeSession!['start_time'])}',
-                            style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w500)),
+                        const Text('Nearby Shops', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.refresh, size: 20),
+                              onPressed: () {
+                                _getCurrentLocation();
+                                _fetchAllShops();
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.qr_code_scanner, size: 20),
+                              onPressed: _scanShopQR,
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                  ],
-
-                  // ---- Nearby Shops ----
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Nearby Shops', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.refresh, size: 20),
-                            onPressed: () {
-                              _getCurrentLocation();
-                              _fetchAllShops();
-                            },
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.qr_code_scanner, size: 20),
-                            onPressed: _scanShopQR,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  _isLoadingGps
-                      ? const SizedBox(height: 30, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
-                      : _gpsError != null
-                          ? Text('GPS error: $_gpsError', style: const TextStyle(color: Colors.red, fontSize: 14))
-                          : _nearbyShops.isEmpty
-                              ? Column(
-                                  children: [
-                                    const Text('No nearby shops found within 5 km.',
-                                        style: TextStyle(color: Colors.grey)),
-                                    const SizedBox(height: 8),
-                                    ElevatedButton.icon(
-                                      onPressed: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => ShopDeliveryFlowScreen(
-                                              delivery: {'id': 'new', 'shop_name': '', 'address': '', 'status': 'pending'},
-                                              driverId: widget.driverId,
+                    _isLoadingGps
+                        ? const SizedBox(height: 30, child: Center(child: CircularProgressIndicator(strokeWidth: 2)))
+                        : _gpsError != null
+                            ? Text('GPS error: $_gpsError', style: const TextStyle(color: Colors.red, fontSize: 14))
+                            : _nearbyShops.isEmpty
+                                ? Column(
+                                    children: [
+                                      const Text('No nearby shops found within 5 km.',
+                                          style: TextStyle(color: Colors.grey)),
+                                      const SizedBox(height: 8),
+                                      ElevatedButton.icon(
+                                        onPressed: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => ShopDeliveryFlowScreen(
+                                                delivery: {'id': 'new', 'shop_name': '', 'address': '', 'status': 'pending'},
+                                                driverId: widget.driverId,
+                                              ),
                                             ),
-                                          ),
-                                        );
-                                      },
-                                      icon: const Icon(Icons.add),
-                                      label: const Text('Create New Shopkeeper'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.teal,
-                                        foregroundColor: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Column(
-                                  children: _nearbyShops.map((shop) {
-                                    final distance = _currentPosition != null && shop['latitude'] != null && shop['longitude'] != null
-                                        ? _calculateDistance(
-                                            _currentPosition!.latitude,
-                                            _currentPosition!.longitude,
-                                            shop['latitude'] as double,
-                                            shop['longitude'] as double,
-                                          ).toStringAsFixed(1)
-                                        : '?';
-                                    return Card(
-                                      margin: const EdgeInsets.symmetric(vertical: 4),
-                                      child: ListTile(
-                                        leading: const Icon(Icons.store, color: Colors.teal),
-                                        title: Text(shop['shop_name'] ?? 'Unknown'),
-                                        subtitle: Text('${shop['address']} • ${distance} km'),
-                                        trailing: ElevatedButton(
-                                          onPressed: () => _startDeliveryForShop(shop),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.green,
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                          ),
-                                          child: const Text('Start'),
+                                          );
+                                        },
+                                        icon: const Icon(Icons.add),
+                                        label: const Text('Create New Shopkeeper'),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.teal,
+                                          foregroundColor: Colors.white,
                                         ),
                                       ),
-                                    );
-                                  }).toList(),
-                                ),
-                  const SizedBox(height: 16),
-
-                  // Stats cards
-                  Row(
-                    children: [
-                      _buildStatCard('Pending', '$pendingCount', Colors.orange),
-                      const SizedBox(width: 8),
-                      _buildStatCard('Delivered', '$deliveredCount', Colors.green),
-                      const SizedBox(width: 8),
-                      _buildStatCard('Total Stock', '${stockItems.fold<int>(0, (sum, item) => sum + (item['quantity_loaded'] as int? ?? 0))}', Colors.blue),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Actions row
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () async {
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => LoadStockScreen(driverId: widget.driverId),
-                              ),
-                            );
-                            if (result == true) {
-                              setState(() {
-                                _dataFuture = _loadDriverData();
-                              });
-                            }
-                          },
-                          icon: const Icon(Icons.inventory),
-                          label: const Text('Load Stock'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.teal,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: isActive ? _endDay : _startDay,
-                          icon: Icon(isActive ? Icons.stop : Icons.play_arrow),
-                          label: Text(isActive ? 'End Day' : 'Start Day'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isActive ? Colors.red : Colors.green,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Today's Deliveries
-                  const Text('Today\'s Deliveries', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  deliveries.isEmpty
-                      ? const Center(child: Padding(padding: EdgeInsets.all(32), child: Text('No deliveries today')))
-                      : ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: deliveries.length,
-                          separatorBuilder: (_, __) => const Divider(),
-                          itemBuilder: (context, index) {
-                            final delivery = deliveries[index];
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: _getStatusColor(delivery['status']),
-                                child: Icon(_getStatusIcon(delivery['status']), color: Colors.white),
-                              ),
-                              title: Text(delivery['shop_name'] ?? 'Unknown'),
-                              subtitle: Text('${delivery['address'] ?? ''}\nItems: ${delivery['items'] ?? ''}'),
-                              trailing: Text(
-                                (delivery['status'] ?? 'pending').toUpperCase(),
-                                style: TextStyle(color: _getStatusColor(delivery['status']), fontWeight: FontWeight.bold),
-                              ),
-                              onTap: () async {
-                                final result = await Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => ShopDeliveryFlowScreen(
-                                      delivery: delivery,
-                                      driverId: widget.driverId,
-                                    ),
+                                    ],
+                                  )
+                                : Column(
+                                    children: _nearbyShops.map((shop) {
+                                      final distance = _currentPosition != null && shop['latitude'] != null && shop['longitude'] != null
+                                          ? _calculateDistance(
+                                              _currentPosition!.latitude,
+                                              _currentPosition!.longitude,
+                                              shop['latitude'] as double,
+                                              shop['longitude'] as double,
+                                            ).toStringAsFixed(1)
+                                          : '?';
+                                      return Card(
+                                        margin: const EdgeInsets.symmetric(vertical: 4),
+                                        child: ListTile(
+                                          leading: const Icon(Icons.store, color: Colors.teal),
+                                          title: Text(shop['shop_name'] ?? 'Unknown'),
+                                          subtitle: Text('${shop['address']} • ${distance} km'),
+                                          trailing: ElevatedButton(
+                                            onPressed: () => _startDeliveryForShop(shop),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.green,
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                            ),
+                                            child: const Text('Start'),
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
                                   ),
-                                );
-                                if (result == true) {
-                                  setState(() {
-                                    _dataFuture = _loadDriverData();
-                                  });
-                                }
-                              },
-                            );
-                          },
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        _buildStatCard('Pending', '$pendingCount', Colors.orange),
+                        const SizedBox(width: 8),
+                        _buildStatCard('Delivered', '$deliveredCount', Colors.green),
+                        const SizedBox(width: 8),
+                        _buildStatCard('Total Stock', '${stockItems.fold<int>(0, (sum, item) => sum + (item['quantity_loaded'] as int? ?? 0))}', Colors.blue),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              final result = await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => LoadStockScreen(driverId: widget.driverId),
+                                ),
+                              );
+                              if (result == true) {
+                                setState(() {
+                                  _dataFuture = _loadDriverData();
+                                });
+                              }
+                            },
+                            icon: const Icon(Icons.inventory),
+                            label: const Text('Load Stock'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.teal,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
                         ),
-                ],
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: isActive ? _endDay : _startDay,
+                            icon: Icon(isActive ? Icons.stop : Icons.play_arrow),
+                            label: Text(isActive ? 'End Day' : 'Start Day'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isActive ? Colors.red : Colors.green,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+
+                    const Text('Today\'s Deliveries', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    deliveries.isEmpty
+                        ? const Center(child: Padding(padding: EdgeInsets.all(32), child: Text('No deliveries today')))
+                        : ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: deliveries.length,
+                            separatorBuilder: (_, __) => const Divider(),
+                            itemBuilder: (context, index) {
+                              final delivery = deliveries[index];
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: _getStatusColor(delivery['status']),
+                                  child: Icon(_getStatusIcon(delivery['status']), color: Colors.white),
+                                ),
+                                title: Text(delivery['shop_name'] ?? 'Unknown'),
+                                subtitle: Text('${delivery['address'] ?? ''}\nItems: ${delivery['items'] ?? ''}'),
+                                trailing: Text(
+                                  (delivery['status'] ?? 'pending').toUpperCase(),
+                                  style: TextStyle(color: _getStatusColor(delivery['status']), fontWeight: FontWeight.bold),
+                                ),
+                                onTap: () async {
+                                  final result = await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => ShopDeliveryFlowScreen(
+                                        delivery: delivery,
+                                        driverId: widget.driverId,
+                                      ),
+                                    ),
+                                  );
+                                  if (result == true) {
+                                    setState(() {
+                                      _dataFuture = _loadDriverData();
+                                    });
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
 
-  // ---- Helper Widgets ----
   Widget _buildStatCard(String label, String value, Color color) {
     return Expanded(
       child: Container(

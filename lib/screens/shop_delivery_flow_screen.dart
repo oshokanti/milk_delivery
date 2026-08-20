@@ -1,5 +1,5 @@
-import 'package:flutter/services.dart' show rootBundle;
 import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
@@ -10,6 +10,9 @@ import 'package:barcode/barcode.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class ShopDeliveryFlowScreen extends StatefulWidget {
   final Map<String, dynamic> delivery;
@@ -65,6 +68,10 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
   bool _isSaving = false;
   List<Map<String, dynamic>> _orderItems = [];
   List<Map<String, dynamic>> _returnItems = [];
+
+  // ---- Voice Order ----
+  bool _isListening = false;
+  bool _isProcessingVoice = false;
 
   @override
   void initState() {
@@ -494,6 +501,138 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
     }
   }
 
+  // ---------- Voice Order with AI ----------
+  Future<void> _voiceOrder() async {
+    if (_isProcessingVoice) return;
+
+    final speech = stt.SpeechToText();
+    bool available = await speech.initialize(
+      onStatus: (status) {
+        if (status == 'notListening' && _isListening) {
+          setState(() => _isListening = false);
+        }
+      },
+      onError: (error) => print('Speech error: $error'),
+    );
+    if (!available) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Speech recognition not available'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    setState(() => _isListening = true);
+    String? spokenText;
+    await speech.listen(
+      onResult: (result) {
+        if (result.finalResult) {
+          spokenText = result.recognizedWords;
+          setState(() => _isListening = false);
+        }
+      },
+      listenFor: const Duration(seconds: 15),
+      pauseFor: const Duration(seconds: 3),
+    );
+
+    if (spokenText == null || spokenText!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No speech detected'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    setState(() => _isProcessingVoice = true);
+    try {
+      final parsed = await _parseOrderWithAI(spokenText!);
+      int filledCount = 0;
+      for (var entry in parsed.entries) {
+        final productName = entry.key;
+        final qty = entry.value;
+        final product = _products.firstWhere(
+          (p) => p['name'] == productName,
+          orElse: () => {},
+        );
+        if (product.isNotEmpty) {
+          _orderControllers[product['id']]?.text = qty.toString();
+          filledCount++;
+        }
+      }
+      if (filledCount == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not match any product from your speech. Please try again.'), backgroundColor: Colors.orange),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Filled $filledCount product(s) from voice'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI error: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      setState(() => _isProcessingVoice = false);
+    }
+  }
+
+  Future<Map<String, int>> _parseOrderWithAI(String spokenText) async {
+    final apiKey = dotenv.env['DEEPSEEK_API_KEY'];
+    if (apiKey == null || apiKey.isEmpty) {
+      throw Exception('Missing DeepSeek API key. Please add DEEPSEEK_API_KEY to .env');
+    }
+
+    final productNames = _products.map((p) => p['name']).join(', ');
+
+    final prompt = '''
+You are a helpful assistant that extracts product quantities from order requests.
+
+Product list: $productNames
+
+Extract the quantities from the following spoken order and return ONLY a JSON object with product names as keys and quantities as integers.
+Example: {"Plain Chaach": 5, "Paneer 200G": 3}
+
+Do not include any extra text or explanation.
+Spoken order: "$spokenText"
+''';
+
+    final response = await http.post(
+      Uri.parse('https://api.deepseek.com/v1/chat/completions'),
+      headers: {
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'model': 'deepseek-chat',
+        'messages': [
+          {'role': 'system', 'content': 'You are a precise JSON extractor.'},
+          {'role': 'user', 'content': prompt},
+        ],
+        'temperature': 0.1,
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('AI API error: ${response.statusCode} - ${response.body}');
+    }
+
+    final data = jsonDecode(response.body);
+    final content = data['choices'][0]['message']['content'];
+    try {
+      final json = jsonDecode(content);
+      final Map<String, int> result = {};
+      json.forEach((key, value) {
+        if (value is int) {
+          result[key] = value;
+        } else if (value is String) {
+          result[key] = int.tryParse(value) ?? 0;
+        }
+      });
+      return result;
+    } catch (e) {
+      throw Exception('Failed to parse AI response: $content');
+    }
+  }
+
   // ---------- Payment Collection ----------
   Future<void> _collectPayment({double? defaultAmount}) async {
     if (defaultAmount == null || defaultAmount <= 0) {
@@ -608,11 +747,9 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
                   );
                 }
 
-                // Pop the payment dialog
                 Navigator.pop(ctx);
                 print('💳 Payment dialog popped, amount: $amount, method: $selectedMethod');
 
-                // Use WidgetsBinding to schedule the final receipt after the dialog is fully dismissed
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted) {
                     print('📢 Calling _showFinalReceipt via WidgetsBinding...');
@@ -631,96 +768,100 @@ class _ShopDeliveryFlowScreenState extends State<ShopDeliveryFlowScreen> {
   }
 
   // ---------- Desktop Printing ----------
+  Future<void> _printReceiptDesktop(String receiptText) async {
+    try {
+      pw.Font? ttf;
+      try {
+        final fontData = await rootBundle.load('assets/fonts/DejaVuSans.ttf');
+        ttf = pw.Font.ttf(fontData);
+        print('✅ Unicode font loaded successfully');
+      } catch (e) {
+        print('⚠️ Unicode font not found, using default font');
+        ttf = null;
+      }
 
+      final cleanText = receiptText
+          .replaceAll('*', '')
+          .replaceAll('_', '')
+          .replaceAll(RegExp(r'[─━]'), '-')
+          .replaceAll('─────────────────────────', '------------------------');
 
-Future<void> _printReceiptDesktop(String receiptText) async {
-  try {
-    // Use the pdf package's built-in DejaVu font
-    final ttf = pw.Font.ttf(await rootBundle.load('assets/fonts/DejaVuSans.ttf'));
-
-    // Clean the text
-    final cleanText = receiptText
-        .replaceAll('*', '')
-        .replaceAll('_', '')
-        .replaceAll(RegExp(r'[─━]'), '-')
-        .replaceAll('─────────────────────────', '------------------------');
-
-    final pdf = pw.Document();
-    pdf.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.roll80,
-        margin: const pw.EdgeInsets.all(10),
-        build: (context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Text('MEDHYA FARM',
-                  style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: ttf)),
-              pw.SizedBox(height: 2),
-              pw.Text('Delivery Receipt',
-                  style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, font: ttf)),
-              pw.Divider(thickness: 1, height: 8),
-              pw.Text(cleanText,
-                  style: pw.TextStyle(fontSize: 10, font: ttf),
-                  textAlign: pw.TextAlign.center),
-              pw.Divider(thickness: 1, height: 8),
-              pw.Text('Thank you for your business!',
-                  style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, font: ttf)),
-            ],
-          );
-        },
-      ),
-    );
-
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: 'Receipt.pdf',
-    );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Receipt sent to printer!'), backgroundColor: Colors.green),
-    );
-  } catch (e) {
-    print('Print error: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error printing: $e'), backgroundColor: Colors.red),
-    );
-  }
-}
-  // ---------- Final Printable Receipt ----------
- Future<void> _showFinalReceipt({required double amount, required String method}) async {
-  print('📢 _showFinalReceipt called with amount: $amount, method: $method');
-  try {
-    final shop = await supabase
-        .from('shopkeepers')
-        .select('shop_name, phone, address')
-        .eq('id', _selectedShopkeeperId!)
-        .maybeSingle();
-
-    final shopName = shop?['shop_name'] ?? 'Unknown Shop';
-    final shopPhone = shop?['phone'] ?? '';
-    final shopAddress = shop?['address'] ?? '';
-
-    double orderTotal = 0;
-    double returnTotal = 0;
-    for (var item in _orderItems) {
-      orderTotal += (item['price'] as num) * (item['quantity'] as int);
-    }
-    for (var item in _returnItems) {
-      final product = _products.firstWhere(
-        (p) => p['id'] == item['product_id'],
-        orElse: () => {'price': 0},
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.roll80,
+          margin: const pw.EdgeInsets.all(10),
+          build: (context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Text('MEDHYA FARM',
+                    style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, font: ttf)),
+                pw.SizedBox(height: 2),
+                pw.Text('Delivery Receipt',
+                    style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, font: ttf)),
+                pw.Divider(thickness: 1, height: 8),
+                pw.Text(cleanText,
+                    style: pw.TextStyle(fontSize: 10, font: ttf),
+                    textAlign: pw.TextAlign.center),
+                pw.Divider(thickness: 1, height: 8),
+                pw.Text('Thank you for your business!',
+                    style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, font: ttf)),
+              ],
+            );
+          },
+        ),
       );
-      returnTotal += (product['price'] as num) * (item['quantity'] as int);
-    }
-    final netAmount = orderTotal - returnTotal;
-    // Calculate previous balance: current balance (after payment) - netAmount + amountPaid
-    final previousBalance = _shopkeeperBalance - netAmount + amount;
-    final amountPaid = amount;
-    final newBalance = _shopkeeperBalance; // already after payment
 
-    final now = DateTime.now().toLocal();
-    final receipt = '''
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+        name: 'Receipt.pdf',
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Receipt sent to printer!'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      print('Print error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error printing: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  // ---------- Final Printable Receipt ----------
+  Future<void> _showFinalReceipt({required double amount, required String method}) async {
+    print('📢 _showFinalReceipt called with amount: $amount, method: $method');
+    try {
+      final shop = await supabase
+          .from('shopkeepers')
+          .select('shop_name, phone, address')
+          .eq('id', _selectedShopkeeperId!)
+          .maybeSingle();
+
+      final shopName = shop?['shop_name'] ?? 'Unknown Shop';
+      final shopPhone = shop?['phone'] ?? '';
+      final shopAddress = shop?['address'] ?? '';
+
+      double orderTotal = 0;
+      double returnTotal = 0;
+      for (var item in _orderItems) {
+        orderTotal += (item['price'] as num) * (item['quantity'] as int);
+      }
+      for (var item in _returnItems) {
+        final product = _products.firstWhere(
+          (p) => p['id'] == item['product_id'],
+          orElse: () => {'price': 0},
+        );
+        returnTotal += (product['price'] as num) * (item['quantity'] as int);
+      }
+      final netAmount = orderTotal - returnTotal;
+      final previousBalance = _shopkeeperBalance - netAmount + amount;
+      final amountPaid = amount;
+      final newBalance = _shopkeeperBalance;
+
+      final now = DateTime.now().toLocal();
+      final receipt = '''
 🧾 *FINAL RECEIPT*
 ─────────────────────────
 Shop: $shopName
@@ -753,50 +894,50 @@ Payment Method: $method
 Thank you for your business!
 ''';
 
-    print('📄 Final receipt generated, showing dialog...');
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Final Receipt'),
-        content: SingleChildScrollView(
-          child: Text(
-            receipt,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+      print('📄 Final receipt generated, showing dialog...');
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          title: const Text('Final Receipt'),
+          content: SingleChildScrollView(
+            child: Text(
+              receipt,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: receipt));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Receipt copied to clipboard!'), backgroundColor: Colors.green),
+                );
+              },
+              child: const Text('Copy'),
+            ),
+            TextButton(
+              onPressed: () => _printReceiptDesktop(receipt),
+              child: const Text('Print', style: TextStyle(color: Colors.blue)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: receipt));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Receipt copied to clipboard!'), backgroundColor: Colors.green),
-              );
-            },
-            child: const Text('Copy'),
-          ),
-          TextButton(
-            onPressed: () => _printReceiptDesktop(receipt),
-            child: const Text('Print', style: TextStyle(color: Colors.blue)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-    print('✅ Final receipt dialog closed.');
-    if (mounted) {
-      Navigator.pop(context, true);
+      );
+      print('✅ Final receipt dialog closed.');
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      print('❌ Error in _showFinalReceipt: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error showing receipt: $e'), backgroundColor: Colors.red),
+      );
     }
-  } catch (e) {
-    print('❌ Error in _showFinalReceipt: $e');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error showing receipt: $e'), backgroundColor: Colors.red),
-    );
   }
-}
 
   // ---------- Initial Receipt Dialog ----------
   Future<void> _showReceiptDialog() async {
@@ -1047,9 +1188,7 @@ Thank you for your business!
         });
       }
 
-      // Show receipt – do NOT pop the screen here
       await _showReceiptDialog();
-
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
@@ -1324,44 +1463,83 @@ Thank you for your business!
 
               // Step 0: Order Entry
               if (_currentStep == 0) ...[
-                const Text('Enter Order Quantities', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Enter Order Quantities',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: (_isProcessingVoice || _isListening) ? null : _voiceOrder,
+                      icon: _isProcessingVoice
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : Icon(_isListening ? Icons.mic : Icons.mic_none),
+                      label: Text(_isProcessingVoice ? 'Processing...' : _isListening ? 'Listening...' : 'Voice Order'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isProcessingVoice
+                            ? Colors.grey
+                            : (_isListening ? Colors.red : Colors.purple),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (_isListening)
+                  const Text(
+                    'Listening... Speak the full order (e.g., "5 Plain Chaach, 3 Paneer")',
+                    style: TextStyle(color: Colors.red, fontSize: 12),
+                  ),
                 const SizedBox(height: 8),
                 if (_isLoadingProducts)
                   const Center(child: CircularProgressIndicator())
                 else
-                  ..._products.map((p) {
-                    final id = p['id'];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(p['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Text('Unit: ${p['unit']}  •  Price: ₹${p['price']}'),
-                                ],
-                              ),
-                            ),
-                            SizedBox(
-                              width: 80,
-                              child: TextField(
-                                controller: _orderControllers[id]!,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'Qty',
-                                  border: OutlineInputBorder(),
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _products.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final p = _products[index];
+                      final id = p['id'];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(p['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    Text('Unit: ${p['unit']}  •  Price: ₹${p['price']}'),
+                                  ],
                                 ),
                               ),
-                            ),
-                          ],
+                              SizedBox(
+                                width: 80,
+                                child: TextField(
+                                  controller: _orderControllers[id]!,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Qty',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                      );
+                    },
+                  ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -1428,39 +1606,46 @@ Thank you for your business!
                 if (_isLoadingProducts)
                   const Center(child: CircularProgressIndicator())
                 else
-                  ..._products.map((p) {
-                    final id = p['id'];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(p['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                                  Text('Unit: ${p['unit']}'),
-                                ],
-                              ),
-                            ),
-                            SizedBox(
-                              width: 80,
-                              child: TextField(
-                                controller: _returnControllers[id]!,
-                                keyboardType: TextInputType.number,
-                                decoration: const InputDecoration(
-                                  labelText: 'Qty',
-                                  border: OutlineInputBorder(),
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _products.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (context, index) {
+                      final p = _products[index];
+                      final id = p['id'];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(p['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                    Text('Unit: ${p['unit']}'),
+                                  ],
                                 ),
                               ),
-                            ),
-                          ],
+                              SizedBox(
+                                width: 80,
+                                child: TextField(
+                                  controller: _returnControllers[id]!,
+                                  keyboardType: TextInputType.number,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Qty',
+                                    border: OutlineInputBorder(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  }).toList(),
+                      );
+                    },
+                  ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,

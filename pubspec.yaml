@@ -80,6 +80,8 @@ dependencies:
   
   share_plus: ^10.1.0    # for sharing files
 
+  speech_to_text: ^7.0.0
+
 
 
 dev_dependencies:

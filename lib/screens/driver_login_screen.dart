@@ -1,9 +1,9 @@
-import 'package:milk_delivery/screens/driver_dashboard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:milk_delivery/screens/driver_dashboard.dart';
 
 class DriverLoginScreen extends StatefulWidget {
   const DriverLoginScreen({super.key});
@@ -11,8 +11,11 @@ class DriverLoginScreen extends StatefulWidget {
   @override
   State<DriverLoginScreen> createState() => _DriverLoginScreenState();
 }
+
 class _DriverLoginScreenState extends State<DriverLoginScreen> {
   final supabase = Supabase.instance.client;
+  final LocalAuthentication _localAuth = LocalAuthentication();
+
   bool _isScanning = false;
   bool _isLoading = false;
   String? _scannedBarcode;
@@ -22,23 +25,38 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   final TextEditingController _barcodeController = TextEditingController();
   bool _obscurePin = true;
 
-  bool get _isMobile => defaultTargetPlatform == TargetPlatform.android ||
-      defaultTargetPlatform == TargetPlatform.iOS;
+  bool _biometricAvailable = false;
+  String _biometricType = 'Biometrics';
 
   @override
   void initState() {
     super.initState();
-    if (_isMobile) _checkBiometricAvailability();
+    _checkBiometricAvailability();
   }
 
   Future<void> _checkBiometricAvailability() async {
     try {
-      final localAuth = LocalAuthentication();
-      final canCheck = await localAuth.canCheckBiometrics;
-      final isAvailable = await localAuth.isDeviceSupported();
-      print('Biometrics available: $canCheck, supported: $isAvailable');
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final isAvailable = await _localAuth.isDeviceSupported();
+      if (canCheck && isAvailable) {
+        final availableBiometrics = await _localAuth.getAvailableBiometrics();
+        if (availableBiometrics.isNotEmpty) {
+          setState(() {
+            _biometricAvailable = true;
+            if (availableBiometrics.contains(BiometricType.face)) {
+              _biometricType = 'Face ID';
+            } else if (availableBiometrics.contains(BiometricType.fingerprint)) {
+              _biometricType = 'Fingerprint';
+            } else if (availableBiometrics.contains(BiometricType.iris)) {
+              _biometricType = 'Iris';
+            } else {
+              _biometricType = 'Biometrics';
+            }
+          });
+        }
+      }
     } catch (e) {
-      print('Biometrics not supported: $e');
+      print('Biometric availability check failed: $e');
     }
   }
 
@@ -56,21 +74,23 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
   }
 
   Future<void> _lookupDriver(String barcodeId) async {
-    // For now, we'll use a hardcoded driver UUID to bypass barcode lookup.
-    // Replace this with the actual barcode lookup later.
     setState(() => _isLoading = true);
+    print('🔍 Looking up barcode: "$barcodeId"');
     try {
       final response = await supabase
           .from('profiles')
           .select('*')
-          .eq('id', 'c4a8f585-57cf-46b4-b107-7980c8f0e90b') // your driver ID
+          .eq('barcode_id', barcodeId)
+          .eq('role', 'driver')
           .maybeSingle();
 
+      print('📦 Response: $response');
+
       if (response == null) {
-        _showError('Driver not found. Please contact admin.');
+        _showError('Invalid barcode. Please contact admin.');
         setState(() {
-          _isLoading = false;
           _isScanning = false;
+          _isLoading = false;
           _scannedBarcode = null;
           _barcodeController.clear();
         });
@@ -78,10 +98,10 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
       }
 
       if (response['is_active'] != true) {
-        _showError('Driver account is deactivated.');
+        _showError('Driver account is deactivated. Contact admin.');
         setState(() {
-          _isLoading = false;
           _isScanning = false;
+          _isLoading = false;
           _scannedBarcode = null;
           _barcodeController.clear();
         });
@@ -93,22 +113,29 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         _isLoading = false;
       });
 
-      if (_driverProfile!['pin_hash'] != null) {
-        _showPinEntry();
-      } else {
+      // Check if PIN is set
+      final storedPin = _driverProfile!['pin_hash'];
+      print('🔑 Stored PIN hash: $storedPin');
+
+      if (storedPin == null || storedPin.isEmpty) {
+        // First login – create PIN
         _showCreatePin();
+      } else {
+        _showPinEntry();
       }
     } catch (e) {
+      print('❌ Error: $e');
       _showError('Error: $e');
       setState(() {
-        _isLoading = false;
         _isScanning = false;
+        _isLoading = false;
         _scannedBarcode = null;
         _barcodeController.clear();
       });
     }
   }
 
+  // ----- Create PIN (first login) -----
   void _showCreatePin() {
     _pinController.clear();
     showDialog(
@@ -145,13 +172,20 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                 _showError('PIN must be 4-6 digits');
                 return;
               }
-              await supabase
-                  .from('profiles')
-                  .update({'pin_hash': pin})
-                  .eq('id', _driverProfile!['id']);
-              _showSuccess('PIN created successfully!');
-              Navigator.pop(context);
-              _navigateToDriverDashboard(); // <-- calls helper
+              try {
+                // Store PIN (plain text for demo – hash in production)
+                await supabase
+                    .from('profiles')
+                    .update({'pin_hash': pin})
+                    .eq('id', _driverProfile!['id']);
+                print('✅ PIN saved for driver ${_driverProfile!['id']}');
+                _showSuccess('PIN created successfully!');
+                Navigator.pop(context);
+                _navigateToDriverDashboard();
+              } catch (e) {
+                print('❌ Error saving PIN: $e');
+                _showError('Error saving PIN: $e');
+              }
             },
             child: const Text('Set PIN'),
           ),
@@ -160,6 +194,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     );
   }
 
+  // ----- Enter PIN (existing driver) -----
   void _showPinEntry() {
     _pinController.clear();
     showDialog(
@@ -192,56 +227,62 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
             onPressed: () async {
               final enteredPin = _pinController.text.trim();
               final storedPin = _driverProfile!['pin_hash'];
+              print('🔐 Entered PIN: $enteredPin, Stored: $storedPin');
               if (enteredPin == storedPin) {
                 _showSuccess('Login successful!');
                 Navigator.pop(context);
-                _navigateToDriverDashboard(); // <-- calls helper
+                _navigateToDriverDashboard();
               } else {
                 _showError('Incorrect PIN');
               }
             },
             child: const Text('Login'),
           ),
-          if (_isMobile && _driverProfile?['pin_hash'] != null)
+          if (_biometricAvailable)
             TextButton(
               onPressed: _authenticateWithBiometrics,
-              child: const Text('Use Fingerprint'),
+              child: Text('Use $_biometricType'),
             ),
         ],
       ),
     );
   }
 
+  // ----- Biometric authentication -----
   Future<void> _authenticateWithBiometrics() async {
     try {
-      final localAuth = LocalAuthentication();
-      final authenticated = await localAuth.authenticate(
-        localizedReason: 'Scan your fingerprint to login',
-        options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Scan your fingerprint or use face recognition to login',
+        options: const AuthenticationOptions(
+          biometricOnly: true,
+          stickyAuth: true,
+        ),
       );
       if (authenticated) {
-        _showSuccess('Fingerprint verified!');
-        Navigator.pop(context);
-        _navigateToDriverDashboard(); // <-- calls helper
+        _showSuccess('$_biometricType verified!');
+        Navigator.pop(context); // close PIN dialog
+        _navigateToDriverDashboard();
       } else {
-        _showError('Fingerprint not recognized');
+        _showError('$_biometricType not recognized');
       }
     } catch (e) {
       _showError('Biometric error: $e');
     }
   }
 
-  // Helper to navigate with driver ID
- void _navigateToDriverDashboard() {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (context) => DriverDashboard(
-        driverId: _driverProfile!['id'],
+  // ----- Navigation (clears stack) -----
+  void _navigateToDriverDashboard() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DriverDashboard(
+          driverId: _driverProfile!['id'],
+        ),
       ),
-    ),
-  );
-}
+      (route) => false,
+    );
+  }
+
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: Colors.red),
@@ -254,6 +295,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
     );
   }
 
+  // ----- UI -----
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -267,7 +309,8 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
           : _scannedBarcode == null
               ? Column(
                   children: [
-                    if (_isMobile)
+                    if (defaultTargetPlatform == TargetPlatform.android ||
+                        defaultTargetPlatform == TargetPlatform.iOS)
                       Expanded(
                         flex: 2,
                         child: MobileScanner(
